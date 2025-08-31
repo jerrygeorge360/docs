@@ -1,365 +1,449 @@
 ---
-id: advanced-xcc
-title: Complex Cross Contract Call
-description: "Master advanced cross-contract call patterns in NEAR Protocol, including callbacks, error handling, and complex multi-contract interactions."
+id: advanced cross-contract
+title: Understanding Cross-Contract Calls in NEAR
+description: "Master the fundamentals of cross-contract interactions in NEAR Protocol, including asynchronous patterns, Promises, and callback handling."
 ---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 import {CodeTabs, Language, Github} from "@site/src/components/codetabs"
 
-This example presents 3 instances of complex cross-contract calls on the NEAR blockchain, showcasing how to batch multiple function calls to a same contract, call multiple contracts in parallel, and handle responses in the callback. It includes both the smart contract and the frontend components. 
+Cross-contract calls in NEAR work differently from most blockchains due to NEAR's sharded architecture. This fundamental difference enables powerful patterns that would be impossible in synchronous systems, but requires understanding some key concepts first.
 
+:::info Advanced Examples
 
-:::info Simple Cross-Contract Calls
-
-Check the tutorial on how to use [simple cross-contract calls](xcc.md)
+For complex multi-contract patterns and complete working examples, see [Complex Cross Contract Calls](advanced-xcc.md)
 
 :::
 
 ---
 
-## Obtaining the Cross Contract Call Example
+## Why NEAR is Different: The Asynchronous Advantage
 
-You have two options to start the Donation Example:
+Unlike Ethereum and other blockchains where contract calls happen synchronously within a single transaction, NEAR operates asynchronously due to its sharded nature. This isn't a limitation—it's a design choice that enables massive scalability.
 
-1. You can use the app through `Github Codespaces`, which will open a web-based interactive environment.
-2. Clone the repository locally and use it from your computer.
+Understanding these two principles is crucial:
 
-| Codespaces                                                                                                                      | Clone locally                                               |
-| ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/near-examples/cross-contract-calls?quickstart=1) | 🌐 `https://github.com/near-examples/cross-contract-calls` |
+- **Cross-contract calls are independent**: Each contract runs in its own execution environment
+- **Cross-contract calls are asynchronous**: You cannot get immediate results from external calls
+
+Think of it like sending emails instead of making phone calls. You send your message, continue with other work, and handle the response when it arrives.
 
 ---
 
-## Structure of the Example
+## Core Patterns in Cross-Contract Calls
 
-The smart contract is available in two flavors: Rust and JavaScript
+NEAR's asynchronous design enables three distinct interaction patterns:
 
-<Tabs groupId="code-tabs">
+### 1. Sequential Actions (Batching)
 
-  <TabItem value="js" label="🌐 JavaScript">
+Execute multiple methods on the same contract in order. If any method fails, the entire batch reverts:
 
-```bash
-┌── sandbox-ts # sandbox testing
-│    ├── external-contracts
-│    │    ├── counter.wasm
-│    │    ├── guest-book.wasm
-│    │    └── hello-near.wasm
-│    └── main.ava.ts
-├── src # contract's code
-│    ├── internal
-│    │    ├── batch_actions.ts
-│    │    ├── constants.ts
-│    │    ├── multiple_contracts.ts
-│    │    ├── similar_contracts.ts
-│    │    └── utils.ts
-│    └── contract.ts
-├── package.json
-├── README.md
-└── tsconfig.json
+<CodeTabs>
+  <Language value="js" language="js">
+
+```javascript
+// Batch multiple calls to maintain atomicity
+Promise.create_batch("target.testnet")
+  .function_call("first_method", {}, 0, 10**12)
+  .function_call("second_method", {}, 0, 10**12);
 ```
 
-  </TabItem>
+  </Language>
+  <Language value="rust" language="rust">
 
-  <TabItem value="rust" label="🦀 Rust">
-
-```bash
-┌── tests # sandbox testing
-│    ├── external-contracts
-│    │    ├── counter.wasm
-│    │    ├── guest-book.wasm
-│    │    └── hello-near.wasm
-│    └── main.ava.ts
-├── src # contract's code
-│    ├── batch_actions.rs
-│    ├── lib.rs
-│    ├── multiple_contracts.rs
-│    └── similar_contracts.rs
-├── Cargo.toml # package manager
-├── README.md
-└── rust-toolchain.toml
+```rust
+// Batch multiple calls to maintain atomicity
+Promise::new("target.testnet".parse().unwrap())
+  .function_call("first_method".to_string(), vec![], 0, 10_u64.pow(12))
+  .and(Promise::new("target.testnet".parse().unwrap())
+    .function_call("second_method".to_string(), vec![], 0, 10_u64.pow(12)))
 ```
 
-  </TabItem>
-
-</Tabs>
-
----
-
-## Smart Contract
-
-### Batch Actions
-
-You can aggregate multiple actions directed towards one same contract into a batched transaction.
-Methods called this way are executed sequentially, with the added benefit that, if one fails then
-they **all get reverted**.
-
-<CodeTabs>
-  <Language value="js" language="js">
-    <Github fname="contract.ts"
-          url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/contract.ts"
-          start="38" end="41" />
-    <Github fname="batch_actions.ts"
-          url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/internal/batch_actions.ts"
-          start="5" end="17" />
-  </Language>
-  <Language value="rust" language="rust">
-    <Github fname="batch_actions.rs"
-            url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-rs/src/batch_actions.rs"
-            start="8" end="20" />
   </Language>
 </CodeTabs>
 
-#### Getting the Last Response
+### 2. Parallel Execution
 
-In this case, the callback has access to the value returned by the **last
-action** from the chain.
+Call multiple contracts simultaneously. Failures in one contract don't affect others:
 
 <CodeTabs>
   <Language value="js" language="js">
-    <Github fname="contract.ts"
-      url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/contract.ts"
-      start="43" end="46" />
-    <Github fname="batch_actions.ts"
-      url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/internal/batch_actions.ts"
-      start="19" end="29" />
-    <Github fname="utils.ts"
-      url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/internal/utils.ts"
-      start="3" end="20" />
+
+```javascript
+// Execute multiple contracts in parallel
+Promise.all([
+    Promise.create("contract-a.testnet").function_call("foo", {}, 0, 10**12),
+    Promise.create("contract-b.testnet").function_call("bar", {}, 0, 10**12)
+]);
+```
+
   </Language>
   <Language value="rust" language="rust">
-    <Github fname="batch_actions.rs"
-            url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-rs/src/batch_actions.rs"
-            start="22" end="35" />
+
+```rust
+// Execute multiple contracts in parallel
+let promise_a = Promise::new("contract-a.testnet".parse().unwrap())
+    .function_call("foo".to_string(), vec![], 0, 10_u64.pow(12));
+let promise_b = Promise::new("contract-b.testnet".parse().unwrap())
+    .function_call("bar".to_string(), vec![], 0, 10_u64.pow(12));
+```
+
   </Language>
 </CodeTabs>
 
----
+### 3. Callback Handling
 
-### Calling Multiple Contracts
-
-A contract can call multiple other contracts. This creates multiple transactions that execute
-all in parallel. If one of them fails the rest **ARE NOT REVERTED**.
+Retrieve and process responses after external calls complete:
 
 <CodeTabs>
   <Language value="js" language="js">
-    <Github fname="contract.ts"
-      url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/contract.ts"
-      start="48" end="51" />
-    <Github fname="multiple_contracts.ts"
-      url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/internal/multiple_contracts.ts"
-      start="6" end="21" />
+
+```javascript
+// Chain calls with callbacks
+CrossContract("external.testnet")
+  .call("get_data", { param: "value" })
+  .then("process_response", { context: "additional_data" })
+  .value();
+```
+
   </Language>
   <Language value="rust" language="rust">
-    <Github fname="multiple_contracts.rs"
-            url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-rs/src/multiple_contracts.rs"
-            start="16" end="55" />
-  </Language>
-</CodeTabs>
 
-#### Getting All Responses
+```rust
+// Chain calls with callbacks
+ext_contract::ext("external.testnet".parse().unwrap())
+  .get_data("value".to_string())
+  .then(Self::ext(env::current_account_id())
+    .process_response("additional_data".to_string()))
+```
 
-In this case, the callback has access to an **array of responses**, which have either the
-value returned by each call, or an error message.
-
-<CodeTabs>
-  <Language value="js" language="js">
-    <Github fname="contract.ts"
-      url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/contract.ts"
-      start="53" end="58" />
-    <Github fname="multiple_contracts.ts"
-      url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/internal/multiple_contracts.ts"
-      start="24" end="41" />
-    <Github fname="utils.ts"
-      url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/internal/utils.ts"
-      start="3" end="20" />
-  </Language>
-  <Language value="rust" language="rust">
-    <Github fname="multiple_contracts.rs"
-            url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-rs/src/multiple_contracts.rs"
-            start="58" end="92" />
   </Language>
 </CodeTabs>
 
 ---
 
-### Multiple Calls - Same Result Type
+## Understanding Promises
 
-This example is a particular case of the previous one ([Calling Multiple Contracts](#calling-multiple-contracts)).
-It simply showcases a different way to check the results by directly accessing the `promise_result` array.
+A Promise in NEAR represents a scheduled instruction for the blockchain—an asynchronous action that executes after the current transaction succeeds.
 
-In this case, we call multiple contracts that will return the same type:
+### Basic Promise Actions
 
-<CodeTabs>
-  <Language value="js" language="js">
-    <Github fname="contract.ts"
-      url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/contract.ts"
-      start="65" end="70" />
-    <Github fname="similar_contracts.ts"
-      url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/internal/similar_contracts.ts"
-      start="6" end="35" />
-  </Language>
-  <Language value="rust" language="rust">
-    <Github fname="similar_contracts.rs"
-            url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-rs/src/similar_contracts.rs"
-            start="8" end="31" />
-  </Language>
-</CodeTabs>
+Promises can perform several types of actions:
 
-#### Getting All Responses
-
-In this case, the callback again has access to an **array of responses**, which we can iterate checking the
-results.
+- **Function calls**: Execute methods on other contracts
+- **Token transfers**: Send NEAR tokens
+- **Batch creation**: Group multiple actions together
 
 <CodeTabs>
   <Language value="js" language="js">
-    <Github fname="contract.ts"
-      url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/contract.ts"
-      start="62" end="65" />
-    <Github fname="similar_contracts.ts"
-      url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/internal/similar_contracts.ts"
-      start="37" end="54" />
-    <Github fname="utils.ts"
-      url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-ts/src/internal/utils.ts"
-      start="3" end="20" />
+
+```javascript
+import { Promise } from 'near-sdk-js';
+
+// Schedule a function call
+Promise.create("other_contract.testnet")
+  .function_call("do_something", {}, 0, 10**12);
+
+// This schedules the call but doesn't execute it immediately
+```
+
   </Language>
   <Language value="rust" language="rust">
-    <Github fname="similar_contracts.rs"
-            url="https://github.com/near-examples/cross-contract-calls/blob/main/contract-advanced-rs/src/similar_contracts.rs"
-            start="32" end="57" />
+
+```rust
+use near_sdk::Promise;
+
+// Schedule a function call
+Promise::new("other_contract.testnet".parse().unwrap())
+  .function_call("do_something".to_string(), vec![], 0, 10_u64.pow(12));
+
+// This schedules the call but doesn't execute it immediately
+```
+
   </Language>
 </CodeTabs>
 
 ---
 
-### Testing the Contract
+## Creating Cross-Contract Calls with Callbacks
 
-The contract readily includes a set of unit and sandbox testing to validate its functionality. To execute the tests, run the following commands:
+To create meaningful cross-contract interactions, you'll typically want to process the results. Here's how to set up calls with callbacks:
 
-<Tabs groupId="code-tabs">
-  <TabItem value="js" label="🌐 JavaScript">
+### High-Level API (Recommended)
 
-  ```bash
-  cd contract-advanced-ts
-  yarn
-  yarn test
-  ```
+<CodeTabs>
+  <Language value="js" language="js">
 
-  </TabItem>
-  <TabItem value="rust" label="🦀 Rust">
+```javascript
+import { near, call, view, NearBindgen, ONE_TGAS } from 'near-sdk-js';
+
+@NearBindgen({})
+export class CrossContractExample {
   
-  ```bash
-  cd contract-advanced-rs
-  cargo test
-  ```
+  @call({})
+  fetch_greeting({ target_contract }) {
+    // Clean and readable approach
+    return CrossContract(target_contract).call(
+      "get_greeting",
+      { name: "World" }
+    ).then(
+      "greeting_callback",
+      { timestamp: near.blockTimestamp() }
+    ).value();
+  }
+}
+```
 
-  </TabItem>
+  </Language>
+  <Language value="rust" language="rust">
 
-</Tabs>
+```rust
+use near_sdk::{near_bindgen, Promise, env, Gas};
 
-:::tip
-The `integration tests` use a sandbox to create NEAR users and simulate interactions with the contract.
+#[near_bindgen]
+impl CrossContractExample {
+    
+    pub fn fetch_greeting(&mut self, target_contract: AccountId) -> Promise {
+        ext_contract::ext(target_contract)
+            .get_greeting("World".to_string())
+            .then(Self::ext(env::current_account_id())
+                .greeting_callback(env::block_timestamp()))
+    }
+}
+```
+
+  </Language>
+</CodeTabs>
+
+### Low-Level Promise API
+
+For fine-grained control, use the Promise API directly:
+
+<CodeTabs>
+  <Language value="js" language="js">
+
+```javascript
+import { Promise, near, ONE_TGAS } from 'near-sdk-js';
+
+// Detailed Promise construction
+Promise.create("external_contract.testnet")
+  .function_call(
+    "get_greeting",
+    { name: "World" },
+    0,                    // Deposit in yoctoNEAR
+    5 * ONE_TGAS         // Gas allowance
+  )
+  .then(near.currentAccountId())
+  .function_call(
+    "greeting_callback",
+    { timestamp: near.blockTimestamp() }
+  )
+  .value();
+```
+
+  </Language>
+  <Language value="rust" language="rust">
+
+```rust
+use near_sdk::{Promise, env, Gas};
+
+// Detailed Promise construction
+Promise::new("external_contract.testnet".parse().unwrap())
+    .function_call(
+        "get_greeting".to_string(),
+        json!({"name": "World"}).to_string().into_bytes(),
+        0,                      // Deposit in yoctoNEAR  
+        Gas(5_000_000_000_000)  // Gas allowance
+    )
+    .then(Promise::new(env::current_account_id())
+        .function_call(
+            "greeting_callback".to_string(),
+            json!({"timestamp": env::block_timestamp()}).to_string().into_bytes(),
+            0,
+            Gas(5_000_000_000_000)
+        ))
+```
+
+  </Language>
+</CodeTabs>
+
+---
+
+## Implementing Callbacks
+
+Callbacks are where your cross-contract calls complete their journey. Here's how to handle them properly:
+
+<CodeTabs>
+  <Language value="js" language="js">
+
+```javascript
+import { near, call, NearBindgen } from 'near-sdk-js';
+
+@NearBindgen({})
+export class CrossContractExample {
+  
+  @call({ privateFunction: true })
+  greeting_callback({ result, timestamp }) {
+    // Access the promise result
+    const promiseResult = near.promiseResult(0);
+    
+    if (promiseResult.length === 0) {
+      // External call failed
+      return {
+        success: false,
+        message: "Failed to get greeting",
+        timestamp
+      };
+    }
+    
+    // Parse successful result
+    const greeting = JSON.parse(promiseResult);
+    return {
+      success: true,
+      greeting,
+      message: `Successfully received: ${greeting}`,
+      timestamp
+    };
+  }
+}
+```
+
+  </Language>
+  <Language value="rust" language="rust">
+
+```rust
+use near_sdk::{near_bindgen, env, PromiseResult, serde_json};
+
+#[near_bindgen]
+impl CrossContractExample {
+    
+    #[private]
+    pub fn greeting_callback(&mut self, timestamp: u64) -> serde_json::Value {
+        // Check the promise result
+        match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => {
+                // External call failed
+                json!({
+                    "success": false,
+                    "message": "Failed to get greeting",
+                    "timestamp": timestamp
+                })
+            }
+            PromiseResult::Successful(data) => {
+                // Parse successful result
+                let greeting: String = serde_json::from_slice(&data).unwrap();
+                json!({
+                    "success": true,
+                    "greeting": greeting,
+                    "message": format!("Successfully received: {}", greeting),
+                    "timestamp": timestamp
+                })
+            }
+        }
+    }
+}
+```
+
+  </Language>
+</CodeTabs>
+
+:::warning Callback Execution
+Your callback will execute whether the external contract succeeds or fails. Always check the promise result status and handle failures appropriately.
 :::
 
-<hr class="subsection" />
+---
 
-### Deploying the Contract to the NEAR network
+## Critical Considerations for Production
 
-In order to deploy the contract you will need to create a NEAR account.
+When building production applications with cross-contract calls, keep these important points in mind:
 
-<Tabs groupId="cli-tabs">
-  <TabItem value="short" label="Short">
+### Manual State Rollbacks
 
-  ```bash
-  # Create a new account pre-funded by a faucet
-  near create-account <accountId> --useFaucet
-  ```
-  </TabItem>
+If an external function fails, your callback executes, but any state changes made in the original call won't automatically revert. You must handle cleanup manually:
 
-  <TabItem value="full" label="Full">
+<CodeTabs>
+  <Language value="js" language="js">
 
-  ```bash
-  # Create a new account pre-funded by a faucet
-  near account create-account sponsor-by-faucet-service <my-new-dev-account>.testnet autogenerate-new-keypair save-to-keychain network-config testnet create
-  ```
-  </TabItem>
-</Tabs>
-
-Go into the directory containing the smart contract (`cd contract-advanced-ts` or `cd contract-advanced-rs`), build and deploy it:
-
-<Tabs groupId="code-tabs">
-
-  <TabItem value="js" label="🌐 JavaScript">
-
-    ```bash
-    npm run build
-    near deploy <accountId> ./build/cross_contract.wasm --initFunction new --initArgs '{"hello_account":"hello.near-example.testnet","guestbook_account":"guestbook_account.near-example.testnet","counter_account":"counter_account.near-example.testnet"}'
-    ```
-
-  </TabItem>
-  <TabItem value="rust" label="🦀 Rust">
+```javascript
+@call({ privateFunction: true })
+payment_callback({ user_id, amount, original_balance }) {
+  const result = near.promiseResult(0);
   
-  ```bash
-  cargo near deploy build-non-reproducible-wasm <accountId> with-init-call new json-args '{"hello_account":"hello.near-example.testnet","guestbook_account":"guestbook_account.near-example.testnet","counter_account":"counter_account.near-example.testnet"}' prepaid-gas '100.0 Tgas' attached-deposit '0 NEAR' network-config testnet sign-with-keychain send
-  ```
-
-  </TabItem>
-
-</Tabs>
-
-<hr class="subsection" />
-
-### CLI: Interacting with the Contract
-
-To interact with the contract through the console, you can use the following commands:
-
-<Tabs groupId="cli-tabs">
-  <TabItem value="short" label="Short">
+  if (result.length === 0) {
+    // External payment failed - restore user's balance
+    this.user_balances.set(user_id, original_balance);
+    this.refund_user(user_id, amount);
+    return { success: false, message: "Payment failed" };
+  }
   
-  ```bash
-  # Execute contracts sequentially
-  # Replace <accountId> with your account ID
-  near call <accountId> batch_actions --accountId <accountId> --gas 300000000000000   
+  // Payment succeeded - process normally
+  return { success: true, message: "Payment completed" };
+}
+```
 
-  # Execute contracts in parallel
-  # Replace <accountId> with your account ID
-  near call <accountId>  multiple_contracts --accountId <accountId> --gas 300000000000000   
+  </Language>
+  <Language value="rust" language="rust">
 
-  # Execute multiple instances of the same contract in parallel
-  # Replace <accountId> with your account ID
-  near call <accountId> similar_contracts --accountId <accountId> --gas 300000000000000
-  ```
-  </TabItem>
+```rust
+#[private]
+pub fn payment_callback(&mut self, user_id: AccountId, amount: u128, original_balance: u128) {
+    match env::promise_result(0) {
+        PromiseResult::Failed => {
+            // External payment failed - restore user's balance
+            self.user_balances.insert(&user_id, &original_balance);
+            self.refund_user(user_id, amount);
+        }
+        PromiseResult::Successful(_) => {
+            // Payment succeeded - process normally
+            near_sdk::log!("Payment completed successfully");
+        }
+        PromiseResult::NotReady => unreachable!(),
+    }
+}
+```
 
-  <TabItem value="full" label="Full">
-  
-  ```bash
-  # Execute contracts sequentially
-  # Replace <accountId> with your account ID
-  near contract call-function as-transaction <accountId> batch_actions json-args '{}' prepaid-gas '300.0 Tgas' attached-deposit '0 NEAR' sign-as <accountId> network-config testnet sign-with-keychain send
+  </Language>
+</CodeTabs>
 
-  # Execute contracts in parallel
-  # Replace <accountId> with your account ID
-  near contract call-function as-transaction <accountId> multiple_contracts json-args '{}' prepaid-gas '300.0 Tgas' attached-deposit '0 NEAR' sign-as <accountId> network-config testnet sign-with-keychain send
+### Gas and Token Management
 
-  # Execute multiple instances of the same contract in parallel
-  # Replace <accountId> with your account ID
-  near contract call-function as-transaction <accountId> similar_contracts json-args '{}' prepaid-gas '300.0 Tgas' attached-deposit '0 NEAR' sign-as <accountId> network-config testnet sign-with-keychain send
-  ```
-  </TabItem>
-</Tabs>
+When your contract attaches NEAR tokens to a cross-contract call that fails, those funds return to your contract—not the original caller. Ensure your callbacks handle refunds appropriately.
 
+### Error Handling Best Practices
 
-:::info
-If at some point you get an "Exceeded the prepaid gas" error, try to increase the gas amount used within the functions when calling other contracts
-:::
+Always implement comprehensive error handling in your callbacks:
 
-:::note Versioning for this article
+1. **Check promise results**: Verify success before processing data
+2. **Validate returned data**: Don't assume external contracts return expected formats
+3. **Implement fallbacks**: Have strategies for when external calls fail
+4. **Log failures**: Help with debugging and monitoring
 
-At the time of this writing, this example works with the following versions:
+---
 
-- near-cli: `4.0.13`
-- node: `18.19.1`
-- rustc: `1.77.0`
+## Why This Design is Powerful
 
+NEAR's asynchronous approach might seem more complex initially, but it provides significant advantages:
+
+**Scalability**: Sharded execution means calls don't compete for the same resources
+**Flexibility**: Design sophisticated workflows impossible in synchronous systems  
+**Reliability**: Failed calls in one contract don't cascade failures to others
+**Performance**: Parallel execution enables faster overall transaction processing
+
+---
+
+## Getting Started
+
+Ready to implement cross-contract calls? Here's a recommended progression:
+
+1. **Start with simple calls**: Practice basic Promise creation and callback handling
+2. **Experiment with patterns**: Try batching, parallel calls, and callback chains
+3. **Handle edge cases**: Implement proper error handling and state management
+4. **Test thoroughly**: Use sandbox testing to validate your cross-contract logic
+
+The asynchronous nature of NEAR requires a mental shift from traditional blockchain development, but mastering these patterns opens up possibilities for building sophisticated, scalable applications that leverage NEAR's unique architecture.
+
+:::tip Next Steps
+Once you're comfortable with these fundamentals, explore the [Complex Cross Contract Call examples](advanced-xcc.md) to see these patterns in action with complete working code.
 :::
